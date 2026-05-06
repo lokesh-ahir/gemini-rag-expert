@@ -1,0 +1,15 @@
+fastapi
+uvicorn
+langchain
+langchain-google-genai
+langchain-qdrant
+qdrant-client
+python-dotenv
+pydantic
+PyPDF2
+python-docx
+sentence-transformers
+python-multipart
+upstash-redis
+langchain-text-splitters
+deepagents
