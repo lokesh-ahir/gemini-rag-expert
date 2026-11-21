@@ -2,17 +2,21 @@
 AI Module - Modular RAG Chatbot with Intent Classification & Model Routing
 
 This module is self-contained and can be extracted for use in other projects.
-Contains:
+
+Features:
 - Intent classification (general_query, edit_schematic, create_design, debug_circuit)
 - Model routing (Gemini Flash for general, Gemini Neon 4 for design tasks)
-- Circuit building from Qdrant components
+- LLM Agent with tool calling (LangChain/LangGraph)
+- Circuit building from Qdrant components (1800+ components)
 - Markdown guide generation
 - PostgreSQL chat history (workspace_id, design_id based)
-- RAG integration for circuit components
-- LLM Agent with tool calling (LangChain/LangGraph)
-- FastAPI endpoints for all functionality
+- Cost tracking
 
-Quick Start:
+API Endpoints (only 2):
+- POST /ai/chat - Send message, get AI response with intent classification and tool calling
+- GET /ai/chat/{design_id} - Retrieve chat messages (paginated, 25 per page)
+
+Usage:
     from ai_module import AIModule, get_ai_module
     
     module = AIModule(
@@ -21,16 +25,15 @@ Quick Start:
         google_api_key="your_key"
     )
     
-    # Use LLM agent with tool calling
+    # Chat with LLM + tool calling
     response = module.chat_with_agent(
         workspace_id="...",
-        design_id="...",
+        design_id="...", 
         query="Create an amplifier with LM386"
     )
-
-To use the API endpoints:
-    from ai_module.api.router import router as ai_router
-    app.include_router(ai_router, prefix="/api/ai")
+    
+    # Get chat history
+    messages, total, pages = module.get_chat_messages(design_id="...", page=1, limit=25)
 """
 
 __version__ = "1.0.0"
@@ -38,7 +41,7 @@ __version__ = "1.0.0"
 # Main module
 from .main import AIModule, get_ai_module, reset_ai_module
 
-# Sub-modules
+# Sub-modules (internal, not exposed via API)
 from . import config
 from . import intent
 from . import routing
@@ -55,14 +58,4 @@ __all__ = [
     "AIModule",
     "get_ai_module",
     "reset_ai_module",
-    "config",
-    "intent",
-    "routing",
-    "rag",
-    "circuit",
-    "guide",
-    "chat",
-    "agent",
-    "tools",
-    "api",
 ]
