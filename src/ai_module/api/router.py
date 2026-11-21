@@ -34,6 +34,7 @@ class ChatResponse(BaseModel):
     intent: str
     model: str
     response: str
+    response_type: str = Field(..., description="Type of response: circuit_created, circuit_edited, circuit_debug, general_response")
     circuit: Optional[Dict[str, Any]] = Field(default=None, description="Generated circuit JSON")
     guide: Optional[str] = Field(default=None, description="Generated markdown guide")
     message_id: str
@@ -99,6 +100,7 @@ async def chat(
             intent=result["intent"],
             model=result["model"],
             response=result["response"],
+            response_type=result["response_type"],
             circuit=result.get("circuit"),
             guide=result.get("guide"),
             message_id=result["assistant_message_id"],

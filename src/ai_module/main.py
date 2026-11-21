@@ -482,6 +482,17 @@ class AIModule:
             workspace_id=str(workspace_id)
         )
         
+        # Determine response type based on intent
+        intent = intent_result.intent
+        if intent == "create_design":
+            response_type = "circuit_created"
+        elif intent == "edit_schematic":
+            response_type = "circuit_edited"
+        elif intent == "debug_circuit":
+            response_type = "circuit_debug"
+        else:
+            response_type = "general_response"
+        
         return {
             "intent": intent_result.intent,
             "confidence": intent_result.confidence,
@@ -491,6 +502,7 @@ class AIModule:
             "circuit": circuit_json,
             "guide": guide_markdown,
             "response": assistant_response,
+            "response_type": response_type,
             "user_message_id": user_msg["id"],
             "assistant_message_id": assistant_msg["id"]
         }
@@ -663,6 +675,17 @@ class AIModule:
             workspace_id=str(workspace_id)
         )
         
+        # Determine response type based on intent
+        intent = intent_result.intent
+        if intent == "create_design":
+            response_type = "circuit_created"
+        elif intent == "edit_schematic":
+            response_type = "circuit_edited"
+        elif intent == "debug_circuit":
+            response_type = "circuit_debug"
+        else:
+            response_type = "general_response"
+        
         return {
             "intent": intent_result.intent,
             "confidence": intent_result.confidence,
@@ -670,6 +693,7 @@ class AIModule:
             "model_type": routing.model.value,
             "cost_estimate": routing.estimated_cost,
             "response": assistant_response,
+            "response_type": response_type,
             "tool_calls": tool_calls,
             "circuit": circuit_json,
             "guide": guide_markdown,
