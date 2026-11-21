@@ -37,9 +37,16 @@ Usage:
         role="user",
         content="Create an amplifier"
     )
+    
+    # Use LLM agent with tool calling
+    response = module.chat_with_agent(
+        workspace_id="...",
+        design_id="...", 
+        query="Create an amplifier with LM386"
+    )
 """
 
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List, Tuple, Callable
 from uuid import UUID
 
 from .config import AIModuleConfig, get_config
@@ -52,6 +59,20 @@ from .circuit.builder import CircuitBuilder, get_circuit_builder
 from .circuit.schemas import Circuit, CircuitValidationError
 from .guide.generator import GuideGenerator, get_guide_generator
 from .chat.history import ChatHistoryService, get_chat_history_service
+
+# Try to import agent components (optional dependency)
+try:
+    from .agent.factory import AgentFactory, get_agent_factory, AgentType
+    from .tools.circuit_tools import (
+        SearchComponentsTool, BuildCircuitTool, GetComponentTool
+    )
+    from .tools.guide_tools import GenerateGuideTool
+    from .tools.chat_tools import (
+        AddMessageTool, GetMessagesTool, CreateWorkspaceTool, CreateDesignTool
+    )
+    AGENT_AVAILABLE = True
+except ImportError:
+    AGENT_AVAILABLE = False
 
 
 class AIModule:
@@ -494,6 +515,167 @@ class AIModule:
             return "Let's debug this circuit. Please describe the issue you're experiencing."
         else:
             return f"I understand you want to: {user_query}"
+    
+    # ==================== Agent with Tool Calling ====================
+    
+    def _get_tools(self):
+        """Get all available tools for the agent"""
+        tools = []
+        
+        # Circuit tools
+        if AGENT_AVAILABLE:
+            tools.extend([
+                SearchComponentsTool(self.circuit_retriever),
+                BuildCircuitTool(self.circuit_builder),
+                GetComponentTool(self.circuit_retriever),
+                GenerateGuideTool(self.guide_generator),
+                AddMessageTool(self.chat_history),
+                GetMessagesTool(self.chat_history),
+                CreateWorkspaceTool(self.chat_history),
+                CreateDesignTool(self.chat_history)
+            ])
+        
+        return tools
+    
+    def chat_with_agent(
+        self,
+        workspace_id: UUID,
+        design_id: UUID,
+        query: str,
+        use_tools: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Chat with the LLM agent that has tool calling capabilities.
+        
+        This is the REAL implementation that:
+        1. Classifies intent
+        2. Uses the appropriate model (Flash for general, Neon 4 for design)
+        3. Lets the LLM call tools as needed
+        4. Returns the actual LLM response with tool results
+        
+        Args:
+            workspace_id: Workspace UUID
+            design_id: Design UUID
+            query: User's message
+            use_tools: Whether to enable tool calling
+        
+        Returns:
+            Response with intent, model, LLM response, tool calls, circuit, guide, etc.
+        """
+        if not AGENT_AVAILABLE:
+            raise ImportError(
+                "LangChain is required for agent functionality. "
+                "Install with: pip install langchain langchain-google-genai langgraph"
+            )
+        
+        # Step 1: Classify intent
+        intent_result = self.classify_intent(
+            query=query,
+            design_id=str(design_id)
+        )
+        
+        # Step 2: Route to model
+        routing = self.route_model(intent_result.intent)
+        
+        # Step 3: Get tools based on intent
+        tools = self._get_tools() if use_tools else []
+        
+        # Step 4: Create agent based on intent
+        factory = get_agent_factory()
+        agent = factory.create_intent_aware_agent(
+            intent=intent_result.intent,
+            tools=tools
+        )
+        
+        # Step 5: Prepare messages
+        from langchain_core.messages import HumanMessage
+        messages = [HumanMessage(content=query)]
+        
+        # Step 6: Get LLM response with tool calling
+        try:
+            response = agent.invoke({"messages": messages})
+            
+            # Extract the final message
+            if hasattr(response, 'messages') and response.messages:
+                final_message = response.messages[-1]
+                assistant_response = final_message.content if hasattr(final_message, 'content') else str(final_message)
+            else:
+                assistant_response = str(response)
+            
+            # Extract tool calls if available
+            tool_calls = []
+            if hasattr(response, 'tool_calls'):
+                tool_calls = response.tool_calls
+            
+        except Exception as e:
+            assistant_response = f"Error: {str(e)}"
+            tool_calls = []
+        
+        # Step 7: Build circuit if design-related (as fallback if tools didn't work)
+        circuit = None
+        guide = None
+        circuit_json = None
+        guide_markdown = None
+        
+        if intent_result.intent in ["edit_schematic", "create_design", "debug_circuit"]:
+            # Check if circuit was built via tools
+            # If not, build it manually
+            if not any("build_circuit" in str(tc) for tc in tool_calls):
+                circuit, errors = self.build_circuit(
+                    query=query,
+                    design_id=str(design_id),
+                    workspace_id=str(workspace_id)
+                )
+                
+                if circuit:
+                    guide = self.generate_guide(circuit)
+                    circuit_json = circuit.model_dump()
+                    guide_markdown = guide
+        
+        # Step 8: Store messages in history
+        user_msg = self.add_chat_message(
+            workspace_id=workspace_id,
+            design_id=design_id,
+            role="user",
+            content=query,
+            intent=intent_result.intent,
+            model_used=None
+        )
+        
+        assistant_msg = self.add_chat_message(
+            workspace_id=workspace_id,
+            design_id=design_id,
+            role="assistant",
+            content=assistant_response,
+            intent=intent_result.intent,
+            model_used=routing.model_id,
+            circuit_json=circuit_json,
+            guide_markdown=guide_markdown
+        )
+        
+        # Step 9: Track cost
+        token_count = len(query.split()) * 4  # Rough estimate
+        self.record_usage(
+            model_type=routing.model,
+            intent=intent_result.intent,
+            token_count=token_count,
+            design_id=str(design_id),
+            workspace_id=str(workspace_id)
+        )
+        
+        return {
+            "intent": intent_result.intent,
+            "confidence": intent_result.confidence,
+            "model": routing.model_id,
+            "model_type": routing.model.value,
+            "cost_estimate": routing.estimated_cost,
+            "response": assistant_response,
+            "tool_calls": tool_calls,
+            "circuit": circuit_json,
+            "guide": guide_markdown,
+            "user_message_id": user_msg["id"],
+            "assistant_message_id": assistant_msg["id"]
+        }
     
     # ==================== Cleanup ====================
     

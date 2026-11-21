@@ -25,6 +25,14 @@ def create_app():
     
     # Include routers
     app.include_router(rag_router, prefix="/api")
+    
+    # Mount AI Module endpoints (if available)
+    try:
+        from src.ai_module.api.router import router as ai_router
+        app.include_router(ai_router, prefix="/api")
+    except ImportError:
+        # AI module not available, skip
+        pass
 
     @app.get("/")
     async def root():
